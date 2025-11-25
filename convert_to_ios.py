@@ -285,20 +285,78 @@ def convert_android_to_ios(input_path, output_path=None, preserve_date=True):
     if temp_png and os.path.exists(temp_png):
         os.remove(temp_png)
     
-    # 保留原始文件的修改时间（使用原始文件，不是临时文件）
-    if preserve_date:
-        try:
-            mtime = os.path.getmtime(original_input_path)
-            os.utime(output_path, (mtime, mtime))
-        except:
-            pass
-    
     # 修复 Orientation（exiftool 有时会设置错误的值）
+    # 注意：这个操作可能会改变文件的创建时间，所以需要在最后重新设置
     try:
         subprocess.run(['exiftool', '-Orientation=1', '-n', '-overwrite_original', output_path], 
                       capture_output=True, text=True, check=True)
     except:
         pass
+    
+    # 保留原始文件的创建时间和修改时间（使用原始文件，不是临时文件）
+    # 必须在所有文件操作完成后最后执行，以确保创建时间不被后续操作覆盖
+    if preserve_date:
+        try:
+            # 获取原始文件的统计信息
+            stat_info = os.stat(original_input_path)
+            mtime = stat_info.st_mtime
+            atime = stat_info.st_atime
+            
+            # 在 macOS 上，使用 SetFile 命令来设置创建时间，touch 设置修改时间
+            if sys.platform == 'darwin':
+                try:
+                    # 获取创建时间（birth time），如果不存在则使用修改时间
+                    birthtime = getattr(stat_info, 'st_birthtime', mtime)
+                    
+                    # 使用 SetFile 设置创建时间和修改时间
+                    birthtime_dt = datetime.fromtimestamp(birthtime)
+                    mtime_dt = datetime.fromtimestamp(mtime)
+                    
+                    # SetFile 日期格式：mm/dd/yyyy hh:mm:ss
+                    birthtime_str = birthtime_dt.strftime('%m/%d/%Y %H:%M:%S')
+                    mtime_str = mtime_dt.strftime('%m/%d/%Y %H:%M:%S')
+                    
+                    # 先使用 SetFile 设置创建时间（-d）
+                    result1 = subprocess.run(['SetFile', '-d', birthtime_str, output_path], 
+                                            capture_output=True, text=True, check=False)
+                    # 再使用 SetFile 设置修改时间（-m）
+                    result2 = subprocess.run(['SetFile', '-m', mtime_str, output_path], 
+                                            capture_output=True, text=True, check=False)
+                    
+                    # 如果 SetFile 失败，使用 touch -t 作为备选（只能设置修改时间）
+                    if result1.returncode != 0:
+                        if not hasattr(convert_android_to_ios, '_batch_mode'):
+                            print(f"⚠️  SetFile 设置创建时间失败 (返回码: {result1.returncode})")
+                        if result1.stderr:
+                            if not hasattr(convert_android_to_ios, '_batch_mode'):
+                                print(f"   错误信息: {result1.stderr}")
+                    if result2.returncode != 0:
+                        if not hasattr(convert_android_to_ios, '_batch_mode'):
+                            print(f"⚠️  SetFile 设置修改时间失败 (返回码: {result2.returncode})")
+                        # 使用 touch -t 作为备选
+                        touch_time_str = birthtime_dt.strftime('%Y%m%d%H%M.%S')
+                        subprocess.run(['touch', '-t', touch_time_str, output_path], 
+                                     capture_output=True, text=True, check=False)
+                except (AttributeError, FileNotFoundError, subprocess.SubprocessError):
+                    # 如果出错，使用 touch -t 作为备选
+                    try:
+                        birthtime = getattr(stat_info, 'st_birthtime', mtime)
+                        birthtime_dt = datetime.fromtimestamp(birthtime)
+                        touch_time_str = birthtime_dt.strftime('%Y%m%d%H%M.%S')
+                        subprocess.run(['touch', '-t', touch_time_str, output_path], 
+                                     capture_output=True, text=True, check=False)
+                    except:
+                        os.utime(output_path, (atime, mtime))
+            else:
+                # 非 macOS 系统，只设置修改时间和访问时间
+                os.utime(output_path, (atime, mtime))
+        except Exception:
+            # 如果出错，至少尝试设置修改时间
+            try:
+                mtime = os.path.getmtime(original_input_path)
+                os.utime(output_path, (mtime, mtime))
+            except:
+                pass
     
     # 验证结果（仅在单文件模式下显示详细信息）
     if not hasattr(convert_android_to_ios, '_batch_mode'):

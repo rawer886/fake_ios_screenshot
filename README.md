@@ -57,7 +57,7 @@ python3 convert_to_ios.py /path/to/images/ /path/to/output/
 2. **保留原始元数据**：
    - 从原始文件复制所有 EXIF 数据（使用 exiftool 的 `-tagsFromFile`）
    - 保留所有 PNG chunks（tEXt、iTXt、tIME 等文本元数据）
-   - 保留原始文件的修改时间
+   - 保留原始文件的创建时间和修改时间（macOS 使用 SetFile 命令）
 3. **添加 iOS 截图元数据**：
    - Image Description: "Screenshot"
    - User Comment: "Screenshot"
